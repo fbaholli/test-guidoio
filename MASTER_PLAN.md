@@ -75,6 +75,8 @@ This is a portfolio proof, not production code. Keep it small, readable and well
 │   │   └── result.ts             # NormalizeResult = { ok, value, warnings[] } | { ok:false, reason, detail }
 │   ├── migrate/
 │   │   ├── backfill.ts  upsert.ts  rejects.ts  warnings.ts  checkpoints.ts
+│   │   ├── apply.ts              # normalise → write → record; shared by backfill and sync
+│   │   ├── write-rows.ts  explain-booking.ts  runs.ts  stats.ts
 │   │   ├── id-map.ts             # legacy_id → uuid lookups
 │   │   ├── report.ts             # console table + reports/run-<id>.{md,json}
 │   │   ├── reconcile.ts  canonical.ts (canonical JSON + sha256)
@@ -399,6 +401,12 @@ Algorithm:
    - On SQLSTATE `23P01` (exclusion_violation), roll back to the savepoint. Look up the conflicting booking's legacy id and record `OVERLAP_INSTRUCTOR` or `OVERLAP_STUDENT` (from the constraint name).
    - On `23503` (FK), record `ORPHAN_*`.
    - **Production note:** at scale, COPY into a staging table and detect overlaps with one set-based query before inserting.
+   - *Built in Phase 4 as split-and-retry* (`src/migrate/write-rows.ts`):
+     - Each batch goes out as **one** multi-row upsert, with column arrays passed through `unnest`, under a savepoint.
+     - If a row breaks a constraint, the writer rolls back to the savepoint and retries the first half, then the second half, down to the single bad row.
+     - The halves go in order, so the outcome is identical to one savepoint per row, "first in wins" included.
+     - A clean batch costs one round trip instead of about 3 per row, which matters with the database on another machine. The full backfill takes ~3 s over Wi-Fi.
+     - Other entities use the same writer: a unique or CHECK violation becomes `INVALID_RECORD`, naming the constraint.
 7. History → `booking_events` with `on conflict do nothing`.
 8. `--dry-run` first saves the `migration_runs` row (with `dry_run = true`) in its own transaction. It then does everything else inside one transaction and rolls back at the end. The report is still produced, and it names a run that exists.
 9. At the end, write `migration_runs.stats` and print a console table per entity: read, inserted, updated, unchanged, rejected (by code), warnings (by code). Also write `reports/run-<id>.md` and `.json`.
@@ -578,7 +586,7 @@ Stop at the end of each phase. Show what changed, how to verify it, and the test
   - *Done when:* integration tests for the constraints pass.
 - [x] **Phase 3 — Normalisers**
   - *Done when:* unit tests cover every §3.2 row.
-- [ ] **Phase 4 — Backfill**
+- [x] **Phase 4 — Backfill**
   - per §6, with report output
   - *Done when:* the §6 acceptance tests pass.
 - [ ] **Phase 5 — Reconciliation**
