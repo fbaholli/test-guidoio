@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import type pg from "pg";
 import type { Logger } from "pino";
 import { z } from "zod";
+import { compareCodeUnits } from "../util/order.js";
 
 export const MIGRATIONS_DIR = fileURLToPath(new URL("../../db/migrations/", import.meta.url));
 
@@ -71,10 +72,10 @@ export function planMigrations(
   }
 
   const appliedVersions = new Set(applied.map((migration) => migration.version));
-  const lastApplied = [...appliedVersions].sort().at(-1);
+  const lastApplied = [...appliedVersions].sort(compareCodeUnits).at(-1);
   const pending = files
     .filter((file) => !appliedVersions.has(file.version))
-    .sort((a, b) => a.version.localeCompare(b.version));
+    .sort((a, b) => compareCodeUnits(a.version, b.version));
 
   for (const file of pending) {
     if (lastApplied !== undefined && file.version < lastApplied) {
