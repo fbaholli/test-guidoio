@@ -80,6 +80,7 @@ This is a portfolio proof, not production code. Keep it small, readable and well
 │   │   ├── id-map.ts             # legacy_id → uuid lookups
 │   │   ├── report.ts             # console table + reports/run-<id>.{md,json}
 │   │   ├── reconcile.ts  canonical.ts (canonical JSON + sha256)
+│   │   ├── reconcile-compare.ts  # pure classification; reconcile-report.ts formats it
 │   │   └── sync.ts               # syncDocument() shared by listener + backfill
 │   ├── api/
 │   │   ├── app.ts  errors.ts     # PG error → HTTP mapping
@@ -431,7 +432,8 @@ Acceptance:
      - Not in Postgres and never rejected: `missing_in_pg`. This is a failure.
      - In Postgres, soft-deleted, with no Firestore doc (hard-deleted in the source and picked up by sync): reported as **deleted in source**, not a failure.
      - Rows with `source = 'api'` exist only in Postgres and are left out of reconciliation.
-3. **Aggregate checks:** the number of active bookings and the sum of `price_cents` per month, on both sides.
+3. **Aggregate checks:** the number of active bookings and the sum of `price_cents` per month, on both sides. Months are Europe/Rome calendar months of `starts_at`. The source side leaves out expected gaps, so a booking rejected for an overlap doesn't count twice.
+   - *Decided in Phase 5:* the canonical booking also includes its `booking_events` (status, time, actor), so a lost history entry shows up as a mismatch on `events`. `legacy_updated_at`, `updated_at` and uuids are bookkeeping, and are left out.
 4. **Output:** a console summary plus `reports/reconcile-<id>.md`. Exit code `0` if clean (expected gaps, rows deleted in source and API rows don't count against it), `1` otherwise. This is the cutover gate.
 
 Acceptance: a clean backfill reconciles with exit 0. Manually changing one Postgres row (`update bookings set price_cents = price_cents + 1 where legacy_id = '...'`) makes it exit 1 and name that record and field.
@@ -589,7 +591,7 @@ Stop at the end of each phase. Show what changed, how to verify it, and the test
 - [x] **Phase 4 — Backfill**
   - per §6, with report output
   - *Done when:* the §6 acceptance tests pass.
-- [ ] **Phase 5 — Reconciliation**
+- [x] **Phase 5 — Reconciliation**
   - per §7
   - *Done when:* the §7 acceptance tests pass.
 - [ ] **Phase 6 — Live sync**
