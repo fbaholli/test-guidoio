@@ -30,7 +30,7 @@ This is a portfolio proof, not production code. Keep it small, readable and well
 - `fastify` v5, `zod` plus `fastify-type-provider-zod` for request/response schemas, `pino` logging with redaction
 - `luxon` for dates and time zones (Europe/Rome, DST-aware), `libphonenumber-js` for phones
 - `@faker-js/faker` with a **fixed seed** for deterministic data
-- `@testcontainers/postgresql` for integration tests. Fallback: the compose DB with a separate test database.
+- Integration tests use the Postgres at `TEST_DATABASE_URL`: the compose DB locally, a `postgres:16` service container in CI. Each test file gets a throwaway `ds_test_*` database cloned from a migrated template. No Testcontainers: Docker may run on another machine (a remote Docker context), which it doesn't support.
 
 ---
 
@@ -44,7 +44,8 @@ This is a portfolio proof, not production code. Keep it small, readable and well
 ├── docker-compose.yml            # postgres:16
 ├── firebase.json                 # emulator config (firestore on 8080, UI on 4000)
 ├── .env.example
-├── package.json  tsconfig.json  vitest.config.ts  biome.json  .gitignore
+├── package.json  pnpm-workspace.yaml  tsconfig.json  vitest.config.ts  biome.json  .gitignore
+├── .github/workflows/ci.yml
 ├── db/migrations/
 │   ├── 001_extensions.sql
 │   ├── 002_core_tables.sql
@@ -53,7 +54,7 @@ This is a portfolio proof, not production code. Keep it small, readable and well
 ├── src/
 │   ├── config.ts                 # zod-validated env
 │   ├── logger.ts                 # pino + redact paths
-│   ├── db/{pool.ts,kysely.ts,migrate.ts,types.ts}
+│   ├── db/{pool.ts,kysely.ts,migrate.ts,reset.ts,types.ts}
 │   ├── source/
 │   │   ├── types.ts              # SourceReader interface, RawDoc type
 │   │   ├── firestore-reader.ts   # paginated by documentId, exposes updateTime
@@ -72,7 +73,7 @@ This is a portfolio proof, not production code. Keep it small, readable and well
 │   │   ├── app.ts  errors.ts     # PG error → HTTP mapping
 │   │   ├── routes/bookings.ts
 │   │   └── repos/{types.ts,postgres.ts,firestore.ts,shadow.ts}
-│   └── cli/{seed.ts,backfill.ts,reconcile.ts,sync.ts,serve.ts}
+│   └── cli/{run-cli.ts,migrate.ts,db-reset.ts,seed.ts,backfill.ts,reconcile.ts,sync.ts,serve.ts}
 ├── test/{unit/,integration/,fixtures/}
 ├── scripts/demo.sh               # runs the whole demo from a fresh clone
 ├── reports/                      # gitignored run reports
@@ -434,7 +435,7 @@ Acceptance (integration test): applying an event with an older `updateTime` afte
 - `POST /v1/bookings` writes to **Postgres** (the future write path) with `source='api'`. It generates `legacy_id = 'api_<uuid>'`, adds the `legacy_id_map` entry, and returns that id (see the id rules in §4).
   - Error mapping in `errors.ts`: `23P01` → `409 { code: "BOOKING_OVERLAP" }`, `23503` → `422 { code: "UNKNOWN_REFERENCE" }`, `23514` → `422 { code: "CONSTRAINT_VIOLATION" }`.
 - Every route has zod schemas.
-- Logging uses pino, with `redact` for `email`, `phone`, `taxCode`, `*.email`, `*.phone`, `*.taxCode` and `req.headers.authorization`.
+- Logging uses pino, with `redact` (`src/logger.ts`) for contact details, tax codes, names and free-text notes, in camelCase (source docs) and snake_case (Postgres rows), at the top level and one level down (`*.email`). Also redacted: `req.headers.authorization`, and `err.detail`, where pg puts row values.
 - Tests use `app.inject`.
 
 Acceptance: a POST that overlaps an existing confirmed booking returns 409. Shadow mode logs a diff for a record changed only in Postgres.
@@ -511,7 +512,7 @@ A table: issue → rule → outcome (fix / warn / reject) → owner → status. 
 - denormalised-name comparison
 - canonical JSON stability (key order, timestamps)
 
-**Integration** (Testcontainers Postgres plus the JSON source):
+**Integration** (the Postgres at `TEST_DATABASE_URL` plus the JSON source):
 - schema migrates from zero
 - exclusion constraint:
   - overlap → `23P01`
@@ -530,7 +531,7 @@ A table: issue → rule → outcome (fix / warn / reject) → owner → status. 
   - 422 on unknown student
   - shadow diff logged
 
-CI (GitHub Actions): `pnpm typecheck && pnpm lint && pnpm test` with Docker available. The JSON source means no emulator is needed in CI.
+CI (GitHub Actions): `pnpm typecheck && pnpm lint && pnpm db:migrate && pnpm test` against a `postgres:16` service container. The JSON source means no emulator is needed in CI.
 
 ---
 
@@ -538,7 +539,7 @@ CI (GitHub Actions): `pnpm typecheck && pnpm lint && pnpm test` with Docker avai
 
 Stop at the end of each phase. Show what changed, how to verify it, and the test output, then wait for "go".
 
-- [ ] **Phase 0 — Scaffold**
+- [x] **Phase 0 — Scaffold**
   - pnpm, TS strict, biome, vitest, compose Postgres, `.env.example`, zod config, pino logger, migration runner, CI workflow
   - `.gitignore` covers `.env`, `reports/`, `*service-account*.json`
   - *Done when:* `pnpm typecheck`, `pnpm lint` and `pnpm test` (a placeholder test) pass, and `pnpm db:up && pnpm db:migrate` works.

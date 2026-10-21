@@ -40,7 +40,7 @@ pnpm demo              # scripts/demo.sh, full run from scratch
 
 ## Testing
 - Every normaliser has table-driven unit tests covering the fixtures in MASTER_PLAN.md §3.2.
-- Integration tests use Testcontainers Postgres and the JSON source (no emulator needed).
+- Integration tests use the JSON source (no emulator needed) and the Postgres at `TEST_DATABASE_URL`: the compose DB locally, a service container in CI. Each test file gets a throwaway `ds_test_*` database cloned from a migrated template. No Testcontainers: Docker may be a remote host.
 - Must-have integration tests:
   - idempotency (second backfill run: all unchanged)
   - resume after a crash
@@ -51,7 +51,7 @@ pnpm demo              # scripts/demo.sh, full run from scratch
 
 ## Security and GDPR
 - **Never commit credentials.** A service-account JSON stays outside the repo (`GOOGLE_APPLICATION_CREDENTIALS`), and `.gitignore` covers `*service-account*.json` and `.env`.
-- Never log PII. pino `redact` covers email, phone, taxCode and the authorization header.
+- Never log PII. pino `redact` (`src/logger.ts`) covers contact details, tax codes, names and free-text notes in camelCase and snake_case, the authorization header and pg error details. It is a safety net: never log whole documents or rows.
 - Reconciliation and shadow-diff output show **legacy ids and field names only**, never values.
 - `migration_rejects.payload` holds raw docs (PII). Treat it as restricted, and say so in the docs.
 
