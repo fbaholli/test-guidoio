@@ -54,7 +54,7 @@ This is a portfolio proof, not production code. Keep it small, readable and well
 ├── src/
 │   ├── config.ts                 # zod-validated env
 │   ├── logger.ts                 # pino + redact paths
-│   ├── db/{pool.ts,kysely.ts,migrate.ts,reset.ts,types.ts}
+│   ├── db/{pool.ts,kysely.ts,migrate.ts,reset.ts,types.ts,errors.ts}
 │   ├── source/
 │   │   ├── types.ts              # SourceReader interface, RawDoc type
 │   │   ├── collections.ts        # collection names in FK order
@@ -82,7 +82,7 @@ This is a portfolio proof, not production code. Keep it small, readable and well
 │   │   ├── routes/bookings.ts
 │   │   └── repos/{types.ts,postgres.ts,firestore.ts,shadow.ts}
 │   └── cli/{run-cli.ts,migrate.ts,db-reset.ts,seed.ts,backfill.ts,reconcile.ts,sync.ts,serve.ts}
-├── test/{unit/,integration/,fixtures/,support/}
+├── test/{unit/,integration/,fixtures/,support/}   # integration/global-setup.ts migrates the template DB
 ├── scripts/demo.sh               # runs the whole demo from a fresh clone
 ├── reports/                      # gitignored run reports
 └── docs/
@@ -560,7 +560,7 @@ Stop at the end of each phase. Show what changed, how to verify it, and the test
   - Firestore writes in batches of ≤ 500
   - `--target=json` writes `test/fixtures/export.json`. `--target=emulator` clears the emulator first. `--target=firestore` refuses unless real credentials are set and the collections are empty.
   - *Done when:* the emulator UI shows the collections, and the JSON export has the fixture ids.
-- [ ] **Phase 2 — Schema**
+- [x] **Phase 2 — Schema**
   - migrations 001–004 exactly as in §4, plus `updated_at` triggers
   - *Done when:* integration tests for the constraints pass.
 - [ ] **Phase 3 — Normalisers**
