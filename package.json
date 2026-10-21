@@ -24,7 +24,8 @@
     "test:int": "vitest run --project integration --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
-    "format": "biome check --write ."
+    "format": "biome check --write .",
+    "demo": "bash scripts/demo.sh"
   },
   "dependencies": {
     "@faker-js/faker": "10.6.0",
