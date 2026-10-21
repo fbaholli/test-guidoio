@@ -13,6 +13,8 @@
     "db:down": "docker compose down",
     "db:migrate": "tsx --env-file-if-exists=.env src/cli/migrate.ts",
     "db:reset": "tsx --env-file-if-exists=.env src/cli/db-reset.ts",
+    "emulator": "firebase emulators:start --only firestore --project demo-driving-school",
+    "seed": "tsx --env-file-if-exists=.env src/cli/seed.ts",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:int": "vitest run --project integration --passWithNoTests",
@@ -21,14 +23,19 @@
     "format": "biome check --write ."
   },
   "dependencies": {
+    "@faker-js/faker": "10.6.0",
+    "firebase-admin": "14.5.0",
+    "luxon": "3.7.2",
     "pg": "8.23.1",
     "pino": "10.4.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
+    "@types/luxon": "3.7.6",
     "@types/node": "22.20.5",
     "@types/pg": "8.23.1",
+    "firebase-tools": "15.34.0",
     "tsx": "4.23.15",
     "typescript": "7.0.2",
     "vitest": "5.0.5"
