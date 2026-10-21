@@ -24,8 +24,12 @@ export const REDACT_PATHS: readonly string[] = [
   // pino wildcards match exactly one level: `*.email` covers `student.email`, not `a.b.email`.
   ...PII_FIELDS.map((field) => `*.${field}`),
   "req.headers.authorization",
+  "password",
+  "*.password",
   // pg puts row values in the error detail, e.g. "Key (email)=(mario@example.com) already exists".
   "err.detail",
+  // Errors from idle pg connections carry the whole client, connection password included.
+  "err.client",
 ];
 
 export const REDACTED = "[REDACTED]";

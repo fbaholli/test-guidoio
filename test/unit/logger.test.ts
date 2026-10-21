@@ -73,6 +73,17 @@ describe("createLogger redaction", () => {
     expect(valueAt(entry, "student.legacyId")).toBe("st_dup_rossi_a");
   });
 
+  it("hides the pg client, and its password, carried by connection errors", () => {
+    const { logger, lastLine } = captureLogger();
+    const error = Object.assign(new Error("terminating connection"), {
+      client: { connectionParameters: { password: "s3cret-pw" } },
+    });
+    logger.error({ err: error, password: "s3cret-pw" }, "idle client error");
+
+    expect(lastLine()).not.toContain("s3cret-pw");
+    expect(lastLine()).toContain("terminating connection");
+  });
+
   it("hides row values that Postgres puts in an error's detail", () => {
     const { logger, lastLine } = captureLogger();
     const error = Object.assign(new Error("duplicate key value violates unique constraint"), {
