@@ -30,8 +30,8 @@ mkdir -p reports
 pnpm install --frozen-lockfile --silent
 
 bold "Postgres: start it and build the schema from zero"
-pnpm -s db:up
-pnpm -s db:reset
+pnpm --silent db:up
+pnpm --silent db:reset
 echo "schema migrated"
 
 bold "Firestore emulator"
@@ -47,15 +47,15 @@ else
 fi
 
 bold "Seed messy data"
-pnpm -s seed
+pnpm --silent seed
 echo "seeded the emulator"
 
 bold "Backfill"
-pnpm -s backfill
+pnpm --silent backfill
 first_run=$(ls -t reports/run-*.json | head -1)
 
 bold "Backfill again: every row must come back unchanged"
-pnpm -s backfill
+pnpm --silent backfill
 second_run=$(ls -t reports/run-*.json | head -1)
 [ "$first_run" != "$second_run" ] || fail "the second backfill wrote no report"
 idempotency=$(node -e '
@@ -69,7 +69,7 @@ idempotency=$(node -e '
 echo "$idempotency"
 
 bold "Reconcile: the cutover gate"
-pnpm -s reconcile || fail "reconciliation is not clean"
+pnpm --silent reconcile || fail "reconciliation is not clean"
 
 bold "API"
 node_modules/.bin/tsx src/cli/serve.ts >reports/api.log 2>&1 &
