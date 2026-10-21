@@ -14,6 +14,8 @@ export type TestDatabase = {
   url: string;
   pool: pg.Pool;
   db: Kysely<DB>;
+  /** Closes the connections; the database can then serve as a template for copies. */
+  close: () => Promise<void>;
   drop: () => Promise<void>;
 };
 
@@ -41,22 +43,34 @@ export async function withAdminClient<T>(run: (client: pg.Client) => Promise<T>)
   }
 }
 
-/** A fresh database: a copy of the migrated template, or completely empty. */
-export async function createTestDatabase(options: { empty?: boolean } = {}): Promise<TestDatabase> {
+/**
+ * A fresh database: a copy of the migrated template, completely empty, or a copy of another
+ * test database (closed first) that already holds data.
+ */
+export async function createTestDatabase(
+  options: { empty?: boolean; copyOf?: string } = {},
+): Promise<TestDatabase> {
   const name = `ds_test_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
-  const template = options.empty ? "template0" : TEMPLATE_DATABASE;
+  const template = options.copyOf ?? (options.empty ? "template0" : TEMPLATE_DATABASE);
   await withAdminClient((client) => createDatabaseWithRetry(client, name, template));
 
   const url = withDatabase(testDatabaseUrl(), name);
   const pool = new pg.Pool({ connectionString: url, max: 5 });
   const db = createDb(pool);
+  let closed = false;
+  const close = async () => {
+    if (closed) return;
+    closed = true;
+    await db.destroy();
+  };
   return {
     name,
     url,
     pool,
     db,
+    close,
     drop: async () => {
-      await db.destroy();
+      await close();
       // Not WITH (FORCE): the pool's connections may still be closing, and killing them makes
       // pg raise an unhandled error that carries the whole client, password included.
       await withAdminClient((client) =>
