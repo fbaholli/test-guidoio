@@ -87,7 +87,7 @@ This is a portfolio proof, not production code. Keep it small, readable and well
 │   ├── api/
 │   │   ├── app.ts  errors.ts     # PG error → HTTP mapping
 │   │   ├── routes/bookings.ts
-│   │   └── repos/{types.ts,postgres.ts,firestore.ts,shadow.ts}
+│   │   └── repos/{types.ts,postgres.ts,firestore.ts,shadow.ts}   # + src/source/document-store.ts
 │   └── cli/{run-cli.ts,migrate.ts,db-reset.ts,seed.ts,backfill.ts,reconcile.ts,sync.ts,serve.ts}
 ├── test/{unit/,integration/,fixtures/,support/}   # integration/global-setup.ts migrates the template DB
 ├── scripts/demo.sh               # runs the whole demo from a fresh clone
@@ -476,6 +476,15 @@ Acceptance (integration test): applying an event with an older `updateTime` afte
 - `POST /v1/bookings` writes to **Postgres** (the future write path) with `source='api'`. It generates `legacy_id = 'api_<uuid>'`, adds the `legacy_id_map` entry, and returns that id (see the id rules in §4).
   - Error mapping in `errors.ts`: `23P01` → `409 { code: "BOOKING_OVERLAP" }`, `23503` → `422 { code: "UNKNOWN_REFERENCE" }`, `23514` → `422 { code: "CONSTRAINT_VIOLATION" }`.
 - Every route has zod schemas.
+- *Decided in Phase 7:*
+  - **Shape:** every read path returns the same view: legacy ids, UTC ISO times, cents and a `deleted` flag. Copied names are never returned.
+  - **Read source:** responses carry `x-read-source`, naming the store that answered, which helps the demo and debugging.
+  - **Firestore path:** it reads through a `DocumentStore` (Firestore, or the JSON export in tests) and the same normaliser. A doc the normaliser rejects reads as 404, because it can't be shown in the API's shape. It loads the reference data for its lookups once every 30 s.
+  - **Instructor list:** it returns lessons overlapping `[from, to)`, leaves out deleted ones, and both bounds need an offset.
+  - **Request errors:** a request that fails its schema is `400 INVALID_REQUEST`, with paths and messages but never the values. That's why a 600-minute lesson never reaches the CHECK constraint. `422 CONSTRAINT_VIOLATION` remains as the safety net.
+  - **POST:** it accepts `booked` or `confirmed` (default `booked`). It writes the booking, its `legacy_id_map` entry and a `booked` event with `source = 'api'` in one transaction.
+  - **Shadow stats:** `/debug/shadow-stats` holds only counts and field names, so it is exposed in every environment.
+  - **Dependencies:** `fastify-type-provider-zod` 7 requires `@fastify/swagger` and `openapi-types` as peers. pnpm installs them with it; nothing uses them.
 - Logging uses pino, with `redact` (`src/logger.ts`) for contact details, tax codes, names and free-text notes, in camelCase (source docs) and snake_case (Postgres rows), at the top level and one level down (`*.email`). Also redacted: `req.headers.authorization`, and `err.detail`, where pg puts row values.
 - Tests use `app.inject`.
 
@@ -603,7 +612,7 @@ Stop at the end of each phase. Show what changed, how to verify it, and the test
 - [x] **Phase 6 — Live sync**
   - per §8
   - *Done when:* the §8 acceptance tests pass, and a manual emulator edit appears in Postgres.
-- [ ] **Phase 7 — API**
+- [x] **Phase 7 — API**
   - per §9
   - *Done when:* the §9 acceptance tests pass.
 - [ ] **Phase 8 — Docs**
