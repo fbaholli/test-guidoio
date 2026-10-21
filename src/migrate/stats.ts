@@ -9,6 +9,8 @@ export type EntityStats = {
   rejected: Record<string, number>;
   warnings: Record<string, number>;
   events: number;
+  /** Live sync only: source deletes turned into deleted_at. */
+  softDeleted: number;
 };
 
 export type RunStats = Partial<Record<CollectionName, EntityStats>>;
@@ -21,6 +23,7 @@ const entityStatsSchema = z.object({
   rejected: z.record(z.string(), z.number()),
   warnings: z.record(z.string(), z.number()),
   events: z.number(),
+  softDeleted: z.number().default(0),
 });
 
 /** Stats saved on the run row, read back when a crashed run is resumed. */
@@ -49,6 +52,7 @@ export function statsFor(stats: RunStats, collection: CollectionName): EntitySta
     rejected: {},
     warnings: {},
     events: 0,
+    softDeleted: 0,
   };
   stats[collection] = fresh;
   return fresh;
