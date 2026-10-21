@@ -70,6 +70,8 @@ This is a portfolio proof, not production code. Keep it small, readable and well
 │   ├── normalize/
 │   │   ├── dates.ts  status.ts  phone.ts  money.ts  email.ts
 │   │   ├── students.ts  instructors.ts  bookings.ts  cities.ts  pickup-points.ts
+│   │   ├── context.ts  fields.ts  license.ts  schemas.ts (strict output shapes)
+│   │   ├── source-context.ts     # lookups built from source docs alone (tests, Firestore reads)
 │   │   └── result.ts             # NormalizeResult = { ok, value, warnings[] } | { ok:false, reason, detail }
 │   ├── migrate/
 │   │   ├── backfill.ts  upsert.ts  rejects.ts  warnings.ts  checkpoints.ts
@@ -173,6 +175,9 @@ These cases have no seed fixture. The normalisers' table-driven unit tests cover
 | `taxCode` malformed after trimming and uppercasing | Imported with `tax_code = null` | warning `TAX_CODE_INVALID` |
 | `licenseCategory` unknown after uppercasing (`"b"` → `"B"`) | Imported with `license_category = null`. For an instructor's `licenseCategories`, only the unknown entry is dropped | warning `LICENSE_CATEGORY_INVALID` |
 | Required field missing (no `studentId`, no `lastName`, …) | **Reject**, with the detail naming the field | `MISSING_REQUIRED_FIELD` |
+| *Added in Phase 3:* a value no rule above covers fails the strict output schema (e.g. `paid: "yes"`) | **Reject**, with the detail naming the field paths, never the values | `INVALID_RECORD` |
+| *Added in Phase 3:* pickup point `lat`/`lng` missing on one side or out of range | Imported with both set to `null`: half a location is no use | warning `COORDINATES_INVALID` |
+| *Added in Phase 3:* a `history` entry without a readable status or time | That entry is dropped; the booking and its other events import | warning `HISTORY_ENTRY_DROPPED` |
 
 ---
 
@@ -343,6 +348,14 @@ create table migration_warnings (
 ## 5. Normalisation (`src/normalize/`)
 
 - Every normaliser is a **pure function**: `(raw, ctx) => NormalizeResult`. `ctx` holds lookups (the id maps) and the run timezone (`Europe/Rome`).
+- Readers hand the normalisers a `RawDoc` (`{ id, updateTime, data }`). A Firestore `Timestamp`, or a `$timestamp` in the JSON export, arrives as a `Date`. Strings and numbers arrive exactly as stored.
+- A booking's checks run in a fixed order, so each bad record gets one predictable reason: student → instructor → pickup point (warning only) → `startAt` → `durationMin` → `status` → `price`.
+- Decided in Phase 3:
+  - `created_at` keeps the source's `createdAt` when it has one. Otherwise, and for collections without that field, it is the doc's `updateTime`. Rows stay deterministic and comparable; they never take the migration's own time.
+  - `deleted: true` becomes `deleted_at = updateTime`. The source doesn't say when the doc was deleted, and its last update is the best evidence.
+  - An ISO string **with** an offset is unambiguous, so it imports without a warning, as §3.2 expects for `bk_date_iso`. Wall-clock strings (Italian or ISO without an offset) warn `DATE_PARSED_FROM_STRING`.
+  - `history` statuses go through the same status map. An unmappable one is kept lower-cased, because `booking_events.status` has no CHECK. A status repeated at the same moment becomes one event.
+  - `DENORM_DRIFT` compares `cityName` against the instructor's city.
 - Parse with a permissive zod "raw" schema, map to the canonical shape, then validate with a strict zod schema.
 - Collect **warnings** (the row still imports) and return **rejects** (the row is skipped) with the codes from §3.2.
 - Dates: accept a Firestore `Timestamp`, an ISO string, the Italian `dd/MM/yyyy HH:mm` (as Europe/Rome), and epoch millis. Reject times that fall in a DST gap: Luxon `isValid` plus a round-trip check. Luxon doesn't mark gap times invalid; it shifts them forward, so the round-trip is the real check. A local time that happens twice (the autumn change, e.g. `25/10/2026 02:30`) resolves to the **first occurrence** (summer time) with warning `DATE_AMBIGUOUS`. Pick the offset explicitly instead of relying on Luxon's default.
@@ -563,7 +576,7 @@ Stop at the end of each phase. Show what changed, how to verify it, and the test
 - [x] **Phase 2 — Schema**
   - migrations 001–004 exactly as in §4, plus `updated_at` triggers
   - *Done when:* integration tests for the constraints pass.
-- [ ] **Phase 3 — Normalisers**
+- [x] **Phase 3 — Normalisers**
   - *Done when:* unit tests cover every §3.2 row.
 - [ ] **Phase 4 — Backfill**
   - per §6, with report output
