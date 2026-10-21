@@ -1,6 +1,7 @@
 import { type Firestore, Timestamp } from "firebase-admin/firestore";
 import type { Logger } from "pino";
 import { COLLECTIONS, type CollectionName } from "../source/collections.js";
+import { chunk } from "../util/chunk.js";
 import {
   isSeedList,
   type SeedDataset,
@@ -11,14 +12,6 @@ import {
 
 /** Firestore's limit on writes in one batch. */
 export const MAX_BATCH_WRITES = 500;
-
-export function chunk<T>(items: readonly T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let start = 0; start < items.length; start += size) {
-    chunks.push(items.slice(start, start + size));
-  }
-  return chunks;
-}
 
 export function toFirestoreFields(fields: SeedFields): Record<string, unknown> {
   return Object.fromEntries(

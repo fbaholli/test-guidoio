@@ -4,12 +4,13 @@ import { describe, expect, it } from "vitest";
 import type { Config } from "../../src/config.js";
 import { parseSeedArgs } from "../../src/seed/args.js";
 import { buildSeedDataset, EXPORT_UPDATE_TIME } from "../../src/seed/dataset.js";
-import { chunk, MAX_BATCH_WRITES, toFirestoreFields } from "../../src/seed/firestore-writer.js";
+import { MAX_BATCH_WRITES, toFirestoreFields } from "../../src/seed/firestore-writer.js";
 import { DEFAULT_EXPORT_PATH, toExportJson } from "../../src/seed/json-export.js";
 import { SeedTimestamp } from "../../src/seed/types.js";
 import { COLLECTIONS } from "../../src/source/collections.js";
 import { exportFileSchema } from "../../src/source/export-format.js";
 import { connectionProblem } from "../../src/source/firestore-client.js";
+import { chunk } from "../../src/util/chunk.js";
 
 const json = toExportJson(buildSeedDataset(), EXPORT_UPDATE_TIME);
 const exported = exportFileSchema.parse(JSON.parse(json));
