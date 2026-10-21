@@ -16,6 +16,7 @@
     "emulator": "firebase emulators:start --only firestore --project demo-driving-school",
     "seed": "tsx --env-file-if-exists=.env src/cli/seed.ts",
     "backfill": "tsx --env-file-if-exists=.env src/cli/backfill.ts",
+    "reconcile": "tsx --env-file-if-exists=.env src/cli/reconcile.ts",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:int": "vitest run --project integration --passWithNoTests",
