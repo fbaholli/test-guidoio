@@ -62,6 +62,8 @@ This is a portfolio proof, not production code. Keep it small, readable and well
 │   │   ├── firestore-client.ts   # Admin SDK connection, emulator vs real-project guards
 │   │   ├── firestore-emulator.ts # emulator REST helpers (health check, clear)
 │   │   ├── firestore-reader.ts   # paginated by documentId, exposes updateTime
+│   │   ├── firestore-listener.ts # onSnapshot per collection → sync events
+│   │   ├── read-all.ts  open-reader.ts
 │   │   └── json-reader.ts        # reads fixtures/export.json (same interface)
 │   ├── seed/
 │   │   ├── calendar.ts  reference-data.ts  generate.ts  fixtures.ts  dataset.ts  types.ts
@@ -446,8 +448,12 @@ Acceptance: a clean backfill reconciles with exit 0. Manually changing one Postg
 - **Newer wins:** the same upsert `where` as the backfill (§6): `bookings.legacy_updated_at is null or bookings.legacy_updated_at < excluded.legacy_updated_at`. This makes duplicate and out-of-order events harmless.
 - **Student events redo the merge.** The listener keeps every student doc in memory (it receives them all anyway). When a student changes, it reruns the dedupe for that normalised email and upserts the merged row. That way an edit to `st_dup_rossi_b` updates the merged student instead of overwriting it with b's fields. **Production note:** keep the email → legacy ids grouping in a Postgres table instead of memory.
 - A deleted doc gets `deleted_at = now()`; nothing is ever hard-deleted.
+  - *Decided in Phase 6:* only `students` and `bookings` have `deleted_at`. A removed city, pickup point or instructor is left in place and logged, and reconciliation flags it as `extra_in_pg` for a person to decide.
+  - Removing a merged duplicate's doc doesn't change the merged student. Removing the surviving doc soft-deletes the merged student.
 - Locally, use `onSnapshot` listeners on the emulator to simulate triggers. Demo: edit a booking in the Emulator UI (localhost:4000) and it shows up in Postgres within a second.
 - Start the listener **before** the backfill so no change falls in a gap. Newer-wins makes the overlap safe.
+  - The listener does not replay each collection's first snapshot. That snapshot is the state at start, which the backfill copies. Every change after it is applied one at a time, in arrival order.
+  - Measured in Phase 6: an edit in the emulator showed up in Postgres on the LAN host **885 ms** later.
 - **Production note (write in the docs, don't build):** Cloud Functions v2 `onDocumentWritten` → Pub/Sub (or Cloud Tasks) → Cloud Run worker calling `syncDocument`. Delivery is at-least-once, so the handler is idempotent. Failed messages go to a dead-letter topic, and reconciliation runs nightly.
 
 Acceptance (integration test): applying an event with an older `updateTime` after a newer one leaves the newer data in place.
@@ -594,7 +600,7 @@ Stop at the end of each phase. Show what changed, how to verify it, and the test
 - [x] **Phase 5 — Reconciliation**
   - per §7
   - *Done when:* the §7 acceptance tests pass.
-- [ ] **Phase 6 — Live sync**
+- [x] **Phase 6 — Live sync**
   - per §8
   - *Done when:* the §8 acceptance tests pass, and a manual emulator edit appears in Postgres.
 - [ ] **Phase 7 — API**
