@@ -615,12 +615,13 @@ Stop at the end of each phase. Show what changed, how to verify it, and the test
 - [x] **Phase 7 — API**
   - per §9
   - *Done when:* the §9 acceptance tests pass.
-- [ ] **Phase 8 — Docs**
+- [x] **Phase 8 — Docs**
   - README, strategy, decisions, ADRs, per §10
   - *Done when:* a reviewer can follow the README demo script on a fresh clone.
-- [ ] **Phase 9 — Final verification**
+- [x] **Phase 9 — Final verification**
   - `scripts/demo.sh` runs the whole flow from scratch: db up, migrate, emulator, seed, backfill, backfill again (idempotency), reconcile, start the API, curl a 409. It finishes with a summary.
   - Fix anything that breaks.
+  - Verified on a fresh clone from GitHub, with nothing running beforehand: `pnpm demo` finished in 23 s with exit code 0, and stopped the emulator and API it started. The first attempt found one bug (pnpm 12 has no `-s` shorthand), fixed in `e83d270`.
 
 **Stretch (only if everything above is done):**
 - transactional outbox table plus a reverse-sync worker (Postgres → Firestore) for old app versions
