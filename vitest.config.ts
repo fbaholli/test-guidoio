@@ -1,4 +1,8 @@
+import { existsSync } from "node:fs";
 import { defineConfig } from "vitest/config";
+
+// Integration tests read TEST_DATABASE_URL. Locally it lives in .env; CI sets it directly.
+if (existsSync(".env")) process.loadEnvFile(".env");
 
 export default defineConfig({
   test: {
@@ -13,7 +17,8 @@ export default defineConfig({
         test: {
           name: "integration",
           include: ["test/integration/**/*.test.ts"],
-          // The database runs on another machine over the LAN, so allow for slow round trips.
+          globalSetup: ["test/integration/global-setup.ts"],
+          // The database may be on another machine over the LAN, so allow for slow round trips.
           testTimeout: 60_000,
           hookTimeout: 60_000,
         },
