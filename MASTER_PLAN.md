@@ -104,7 +104,18 @@ Every source doc also carries `updateTime` (from the Firestore snapshot; `_updat
 
 3 cities (Milano, Roma, Torino), 12 pickup points, 15 instructors, 300 students (about 3% duplicates by email), about 2,000 bookings spread over 8 weeks. The generated "normal" data is mostly clean. All the interesting cases come from the **known-bad fixtures** below.
 
+- The 8-week window starts on a **fixed date**, Monday 2026-09-07, never "now". Faker's date helpers default to today, so always pass the reference date. Otherwise `export.json` would change every day.
+- Generated bookings sit on a **non-overlapping slot grid** for each instructor and each student. The generator itself never creates an overlap.
+- Generated bookings copy the denormalised names **exactly** (`studentName` = `firstName + " " + lastName`, `instructorName` = `fullName`, `cityName` = the city's `name`), so `bk_denorm_drift` is the only booking that triggers `DENORM_DRIFT`.
+
 ### 3.2 Known-bad fixtures (fixed IDs; tests assert on these)
+
+Fixture design rules, so each fixture lands in exactly one predictable outcome:
+
+- Fixtures use a **dedicated pool** of instructors and students (`in_fx_*`, `st_fx_*`, plus the student fixtures `st_dup_rossi_*`, `st_bad_phone` and `st_phone_formats_*`). Generated bookings never use them. Fixtures that aren't meant to clash either have different instructors and students or don't overlap in time.
+- The backfill reads in document-id order, so in an overlap **the booking stored first wins**. Ids compare character by character, so the booking meant to win must have the id that sorts first. For example, `bk_overlap_a` < `bk_overlap_b`, and `bk_student_overlap` clashes with `bk_student_base`, which sorts before it.
+- `bk_overlap_a` and `bk_overlap_b` have **different students**, so only the instructor constraint can fire.
+- `bk_date_timestamp`, `bk_date_iso`, `bk_date_it_string` and `bk_date_epoch` are **the same instant** on purpose: 2026-10-21 14:30 Europe/Rome, which is 12:30Z. A unit test asserts that the four formats give one moment. They use different instructors and students, so they don't overlap each other.
 
 | Doc id | Problem | Expected outcome |
 |---|---|---|
@@ -116,13 +127,14 @@ Every source doc also carries `updateTime` (from the Firestore snapshot; `_updat
 | `bk_overlap_a` + `bk_overlap_b` | Same instructor, overlapping by 30 min, both `confirmed` | `a` imported. `b` **rejected** `OVERLAP_INSTRUCTOR`, with the detail naming `bk_overlap_a`. **No automatic winner picking beyond first-in**: ops resolves it from the rejects report. |
 | `bk_overlap_cancelled` | Overlaps `bk_overlap_a` but status `cancelled` | Imported (cancelled lessons don't block) |
 | `bk_adjacent_1` / `bk_adjacent_2` | 10:00–11:00 and 11:00–12:00, same instructor | Both imported (half-open ranges `[)`) |
-| `bk_student_overlap` | Same student in two lessons at once, different instructors | **Reject** `OVERLAP_STUDENT` |
+| `bk_student_base` + `bk_student_overlap` | Same student in two lessons at once, different instructors | `bk_student_base` imported. `bk_student_overlap` **rejected** `OVERLAP_STUDENT`, with the detail naming `bk_student_base` |
 | `bk_date_timestamp` | `startAt` is a Firestore Timestamp | Imported |
 | `bk_date_iso` | `"2026-10-21T14:30:00+02:00"` | Imported |
 | `bk_date_it_string` | `"21/10/2026 14:30"` (Italian local time) | Parsed as Europe/Rome, warning `DATE_PARSED_FROM_STRING` |
 | `bk_date_epoch` | `1792585800000` (millis) | Imported, warning `DATE_PARSED_FROM_NUMBER` |
 | `bk_date_garbage` | `"domani pomeriggio"` | **Reject** `INVALID_DATE` |
 | `bk_dst_gap` | `"29/03/2026 02:30"` (does not exist in Europe/Rome) | **Reject** `DST_GAP` |
+| `bk_dst_ambiguous` | `"25/10/2026 02:30"` (happens twice in Europe/Rome: summer time, then winter time) | Imported as the first occurrence (02:30 CEST = 00:30Z), warning `DATE_AMBIGUOUS` |
 | `bk_status_variants_*` | `"Cancelled"`, `"canceled"`, `" CONFIRMED "`, `"noshow"` | Mapped to the canonical status, warning `STATUS_NORMALIZED` |
 | `bk_status_unknown` | `"rescheduled"` | **Reject** `INVALID_STATUS`. The decisions doc says "needs product decision". |
 | `bk_no_duration` | `durationMin` missing | Default 60, warning `DURATION_DEFAULTED` |
@@ -133,6 +145,21 @@ Every source doc also carries `updateTime` (from the Firestore snapshot; `_updat
 | `bk_history_nested` | `history` with 3 status changes | 3 rows in `booking_events`. A re-run must not duplicate them. |
 | `bk_deleted` | `deleted: true` | Imported with `deleted_at` set; doesn't block overlaps |
 | `bk_unknown_fields` | extra fields `legacyFlag`, `tmp2` | Imported; warning `UNKNOWN_FIELDS` listing the field names |
+
+### 3.3 Other reason and warning codes
+
+These cases have no seed fixture. The normalisers' table-driven unit tests cover them. All codes from §3.2 and §3.3 live in `src/normalize/result.ts`.
+
+| Case | Outcome | Code |
+|---|---|---|
+| Price negative or unreadable (`"gratis"`) | **Reject** | `INVALID_PRICE` |
+| Price missing | Imported with `price_cents = null` | warning `PRICE_MISSING` |
+| Booking's `pickupPointId` unknown | Imported with `pickup_point_id = null`: the lesson matters more than the pickup point | warning `ORPHAN_PICKUP_POINT` |
+| Pickup point's or instructor's `cityId` unknown | **Reject**, because `city_id` is `not null`. Rejecting an instructor also rejects their bookings as `ORPHAN_INSTRUCTOR` | `ORPHAN_CITY` |
+| Student's `cityId` unknown | Imported with `city_id = null` | warning `CITY_UNKNOWN` |
+| `taxCode` malformed after trimming and uppercasing | Imported with `tax_code = null` | warning `TAX_CODE_INVALID` |
+| `licenseCategory` unknown after uppercasing (`"b"` → `"B"`) | Imported with `license_category = null`. For an instructor's `licenseCategories`, only the unknown entry is dropped | warning `LICENSE_CATEGORY_INVALID` |
+| Required field missing (no `studentId`, no `lastName`, …) | **Reject**, with the detail naming the field | `MISSING_REQUIRED_FIELD` |
 
 ---
 
@@ -293,6 +320,11 @@ create table migration_warnings (
 
 **Gotcha to keep:** don't make `ends_at` a generated column (`starts_at + interval`). `timestamptz + interval` is only STABLE, not IMMUTABLE, so Postgres rejects it in a generated column. Compute `ends_at` in the normaliser and protect it with the CHECK constraints. Mention this in ADR 0002.
 
+**Id rules:**
+- `legacy_id_map` has an entry for **every** migrated row, not only merged duplicates. It is the one way an old (Firestore) id becomes a uuid, both for FK resolution in the normalisers and for API lookups. A merged student has several entries pointing at the same uuid.
+- Going from a uuid back to an old id uses the table's own `legacy_id` column. For a merged student, that is the surviving id: the oldest `createdAt`, e.g. `st_dup_rossi_a`.
+- Bookings created through the API have no Firestore document. They get `legacy_id = 'api_' || <uuid>` and a `legacy_id_map` entry, so they are looked up like any other booking. The id is also a valid Firestore document id if bookings are ever copied back (reverse sync).
+
 ---
 
 ## 5. Normalisation (`src/normalize/`)
@@ -300,12 +332,16 @@ create table migration_warnings (
 - Every normaliser is a **pure function**: `(raw, ctx) => NormalizeResult`. `ctx` holds lookups (the id maps) and the run timezone (`Europe/Rome`).
 - Parse with a permissive zod "raw" schema, map to the canonical shape, then validate with a strict zod schema.
 - Collect **warnings** (the row still imports) and return **rejects** (the row is skipped) with the codes from §3.2.
-- Dates: accept a Firestore `Timestamp`, an ISO string, the Italian `dd/MM/yyyy HH:mm` (as Europe/Rome), and epoch millis. Reject times that fall in a DST gap: Luxon `isValid` plus a round-trip check.
+- Dates: accept a Firestore `Timestamp`, an ISO string, the Italian `dd/MM/yyyy HH:mm` (as Europe/Rome), and epoch millis. Reject times that fall in a DST gap: Luxon `isValid` plus a round-trip check. Luxon doesn't mark gap times invalid; it shifts them forward, so the round-trip is the real check. A local time that happens twice (the autumn change, e.g. `25/10/2026 02:30`) resolves to the **first occurrence** (summer time) with warning `DATE_AMBIGUOUS`. Pick the offset explicitly instead of relying on Luxon's default.
 - Status map: lowercase, trim, then `cancelled|canceled → cancelled`, `noshow|no-show|no_show → no_show`, and so on. Anything unknown is a reject.
 - Phone: `libphonenumber-js` with default country `IT`, output E.164. If it can't be parsed, store `null` with a warning.
-- Money: number euros → cents (`Math.round(x*100)`); `"45,50"` / `"45.50"` → cents; negative → reject.
+- Money: number euros → cents (`Math.round(x*100)`); `"45,50"` / `"45.50"` → cents; negative or unreadable → reject `INVALID_PRICE`; missing → `null` with warning `PRICE_MISSING`.
 - Email: trim plus lowercase for matching. Store the trimmed original casing.
+- Denormalised names (`DENORM_DRIFT`): compare after trimming, collapsing repeated spaces and ignoring case. Check `studentName` against `firstName + " " + lastName` of the student (the merged student, for duplicates), `instructorName` against the instructor's `fullName`, and `cityName` against the city's `name`. The copied names are never stored.
 - Students dedupe: group by normalised email. The oldest `createdAt` is canonical (tie-break by doc id). Fill null fields from the duplicates. Write all legacy ids to `legacy_id_map`. Doing this in memory is fine at demo size. **Production note:** use a staging table with `row_number() over (partition by lower(trim(email)) order by created_at, legacy_id)`.
+  - Only non-deleted students merge. Deleted students are imported as their own rows, with `deleted_at` set.
+  - The merged row's `legacy_updated_at` is the newest `updateTime` in the group, so an edit to any duplicate counts as a change.
+  - Known limit: if an email later changes so that a merged pair no longer matches, they are not split again. The decisions doc records this.
 
 ---
 
@@ -318,15 +354,19 @@ Algorithm:
 1. Create a `migration_runs` row. With `--resume`, continue the latest unfinished run from `migration_checkpoints`.
 2. Process collections in FK order: `cities → pickupPoints → instructors → students → bookings` (then `booking_events` per booking).
 3. Read with **cursor pagination**: `orderBy(FieldPath.documentId()).startAfter(lastId).limit(batchSize)`. After each committed batch, upsert the checkpoint.
+   - Students are the exception, because a duplicate pair can span two batches. Read the whole collection (still paged) and merge duplicates **before** writing anything, then write in batches with checkpoints. A resume re-reads all students; rows already written come back unchanged.
 4. For each batch, normalise every doc. Insert rejects and warnings. Write the valid rows in **one transaction per batch**.
 5. **Idempotent upsert:**
    ```sql
    insert into bookings (...) values (...)
    on conflict (legacy_id) do update set ... , legacy_updated_at = excluded.legacy_updated_at
-   where bookings.legacy_updated_at is distinct from excluded.legacy_updated_at
+   where bookings.legacy_updated_at is null
+      or bookings.legacy_updated_at < excluded.legacy_updated_at
    returning (xmax = 0) as inserted;
    ```
-   - No row returned means **unchanged**.
+   - This is the **same newer-wins rule live sync uses** (§8). Live sync starts before the backfill. With "is distinct from", a backfill batch read just before a live edit could overwrite the newer row the listener had already saved.
+   - Trade-off: re-running after a normaliser fix doesn't touch docs whose `updateTime` didn't change. Add a `--force` flag if that is ever needed.
+   - No row returned means **unchanged** (the stored version is the same or newer).
    - `inserted = true` means **inserted**; otherwise it was **updated**.
    - Count all three.
 6. **Constraint violations per row without killing the batch:** wrap each booking insert in a `SAVEPOINT`.
@@ -334,7 +374,7 @@ Algorithm:
    - On `23503` (FK), record `ORPHAN_*`.
    - **Production note:** at scale, COPY into a staging table and detect overlaps with one set-based query before inserting.
 7. History → `booking_events` with `on conflict do nothing`.
-8. `--dry-run` does everything inside one transaction and rolls back at the end. The report is still produced.
+8. `--dry-run` first saves the `migration_runs` row (with `dry_run = true`) in its own transaction. It then does everything else inside one transaction and rolls back at the end. The report is still produced, and it names a run that exists.
 9. At the end, write `migration_runs.stats` and print a console table per entity: read, inserted, updated, unchanged, rejected (by code), warnings (by code). Also write `reports/run-<id>.md` and `.json`.
 
 Acceptance:
@@ -346,13 +386,19 @@ Acceptance:
 
 ## 7. Reconciliation (`pnpm reconcile`)
 
-1. **Counts per entity:** `firestore_docs = pg_rows + rejected + merged_duplicates`. For students, merged duplicates live in `legacy_id_map` and aren't separate rows.
+1. **Counts per entity:** `firestore_docs = pg_rows + rejected + merged_duplicates`. For students, merged duplicates live in `legacy_id_map` and aren't separate rows. `pg_rows` leaves out API rows and rows deleted in the source (see the rules below).
 2. **Per-record checksums:**
    - Normalise each Firestore doc with the *same* normaliser, build a canonical JSON (sorted keys, UTC ISO timestamps, cents, FKs expressed as **legacy ids**), then `sha256`.
-   - Build the same canonical JSON from each Postgres row, mapping uuids back to legacy ids through `legacy_id_map`.
+   - Build the same canonical JSON from each Postgres row, mapping uuids back to legacy ids through each table's own `legacy_id` column.
+   - FKs to a merged student are expressed as the **surviving id** on both sides. `bk_dup_student_ref` points at `st_dup_rossi_b` in Firestore, but both sides compare it as `st_dup_rossi_a`. Otherwise it would mismatch forever, and reconciliation could never exit 0.
    - Compare by legacy id and report `missing_in_pg`, `extra_in_pg` and `mismatched`, with the field names that differ. Never print PII values.
+   - Rules for records present on only one side:
+     - Not in Postgres, with at least one `migration_rejects` row from any run (backfill or sync): an **expected gap**. It is counted, not a failure.
+     - Not in Postgres and never rejected: `missing_in_pg`. This is a failure.
+     - In Postgres, soft-deleted, with no Firestore doc (hard-deleted in the source and picked up by sync): reported as **deleted in source**, not a failure.
+     - Rows with `source = 'api'` exist only in Postgres and are left out of reconciliation.
 3. **Aggregate checks:** the number of active bookings and the sum of `price_cents` per month, on both sides.
-4. **Output:** a console summary plus `reports/reconcile-<id>.md`. Exit code `0` if clean (known rejects are excluded), `1` otherwise. This is the cutover gate.
+4. **Output:** a console summary plus `reports/reconcile-<id>.md`. Exit code `0` if clean (expected gaps, rows deleted in source and API rows don't count against it), `1` otherwise. This is the cutover gate.
 
 Acceptance: a clean backfill reconciles with exit 0. Manually changing one Postgres row (`update bookings set price_cents = price_cents + 1 where legacy_id = '...'`) makes it exit 1 and name that record and field.
 
@@ -361,7 +407,8 @@ Acceptance: a clean backfill reconciles with exit 0. Manually changing one Postg
 ## 8. Live sync (`pnpm sync`)
 
 - `syncDocument(collection, snapshot)` reuses the normaliser and the upsert. It is shared by the backfill and the listener.
-- **Newer wins:** the upsert's `where` becomes `bookings.legacy_updated_at < excluded.legacy_updated_at`. This makes duplicate and out-of-order events harmless.
+- **Newer wins:** the same upsert `where` as the backfill (§6): `bookings.legacy_updated_at is null or bookings.legacy_updated_at < excluded.legacy_updated_at`. This makes duplicate and out-of-order events harmless.
+- **Student events redo the merge.** The listener keeps every student doc in memory (it receives them all anyway). When a student changes, it reruns the dedupe for that normalised email and upserts the merged row. That way an edit to `st_dup_rossi_b` updates the merged student instead of overwriting it with b's fields. **Production note:** keep the email → legacy ids grouping in a Postgres table instead of memory.
 - A deleted doc gets `deleted_at = now()`; nothing is ever hard-deleted.
 - Locally, use `onSnapshot` listeners on the emulator to simulate triggers. Demo: edit a booking in the Emulator UI (localhost:4000) and it shows up in Postgres within a second.
 - Start the listener **before** the backfill so no change falls in a gap. Newer-wins makes the overlap safe.
@@ -384,7 +431,7 @@ Acceptance (integration test): applying an event with an older `updateTime` afte
   - `FirestoreBookingsRepo`, which reads the emulator and normalises with the same code
   - `ShadowBookingsRepo`, which reads both in parallel and **returns Firestore**. It compares the canonical forms and logs `shadow_diff` with the legacy id and field names only. It also keeps an in-memory diff counter exposed on `GET /debug/shadow-stats`.
 - Read source per route, from env: `BOOKINGS_READ_SOURCE=firestore|postgres|shadow`. Optionally the `x-read-source` header can override it in non-production, for the demo.
-- `POST /v1/bookings` writes to **Postgres** (the future write path) with `source='api'`.
+- `POST /v1/bookings` writes to **Postgres** (the future write path) with `source='api'`. It generates `legacy_id = 'api_<uuid>'`, adds the `legacy_id_map` entry, and returns that id (see the id rules in §4).
   - Error mapping in `errors.ts`: `23P01` → `409 { code: "BOOKING_OVERLAP" }`, `23503` → `422 { code: "UNKNOWN_REFERENCE" }`, `23514` → `422 { code: "CONSTRAINT_VIOLATION" }`.
 - Every route has zod schemas.
 - Logging uses pino, with `redact` for `email`, `phone`, `taxCode`, `*.email`, `*.phone`, `*.taxCode` and `req.headers.authorization`.
@@ -442,7 +489,7 @@ Also cover:
   - Erasure handled on both stores during the dual-run
 
 ### docs/data-quality-decisions.md
-A table: issue → rule → outcome (fix / warn / reject) → owner → status. Cover every row of §3.2, plus "rescheduled status: needs product decision".
+A table: issue → rule → outcome (fix / warn / reject) → owner → status. Cover every row of §3.2 and §3.3, plus "rescheduled status: needs product decision". List the known limits too: merged students aren't split again when an email changes, and ambiguous autumn times take the first occurrence.
 
 ### ADRs (short, one page each)
 - 0001: why Postgres (relational integrity, constraints, reporting, cost predictability)
@@ -454,12 +501,14 @@ A table: issue → rule → outcome (fix / warn / reject) → owner → status. 
 ## 11. Tests (Vitest)
 
 **Unit** (table-driven, no I/O):
-- every normaliser, including all of §3.2
-- the DST gap
+- every normaliser, including all of §3.2 and §3.3
+- the DST gap and the ambiguous autumn time
+- the four date formats of the same instant give one moment
 - the status map
 - phone formats
 - the money parser
-- student dedupe
+- student dedupe (deleted students don't merge)
+- denormalised-name comparison
 - canonical JSON stability (key order, timestamps)
 
 **Integration** (Testcontainers Postgres plus the JSON source):
@@ -472,8 +521,10 @@ A table: issue → rule → outcome (fix / warn / reject) → owner → status. 
 - the backfill end-to-end: every known-bad fixture lands in its expected outcome
 - **idempotency**: a second run is all unchanged
 - **resume**: a simulated crash after batch 2, then resume, gives an identical final state
+- `--dry-run` leaves only its `migration_runs` row behind
 - reconciliation is clean after the backfill, then detects a mutation
-- sync: newer wins, a stale event is ignored, a delete soft-deletes
+- reconciliation doesn't fail on merged-student references, API rows or rows deleted in the source
+- sync: newer wins, a stale event is ignored, a delete soft-deletes, and an edit to a merged duplicate updates the merged student
 - API:
   - 409 on overlap
   - 422 on unknown student
