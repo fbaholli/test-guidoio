@@ -315,8 +315,9 @@ function earliest(first: DateTime, ...rest: DateTime[]): DateTime {
   return rest.reduce((min, value) => (value < min ? value : min), first);
 }
 
+/** A valid Italian mobile (32x, 33x, 34x, 38x), so only the phone fixtures fail to parse. */
 function mobilePhone(faker: Faker): string {
-  return `+393${faker.string.numeric(9)}`;
+  return `+393${faker.helpers.arrayElement(["2", "3", "4", "8"])}${faker.string.numeric(8)}`;
 }
 
 /** Shaped like a codice fiscale (16 characters), without a valid check letter. */
