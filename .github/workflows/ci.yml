@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Same path as local integration tests: a plain Postgres reached through TEST_DATABASE_URL.
+    # The password only exists for this throwaway container.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: driving
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: driving_school
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U driving -d driving_school"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+
+    env:
+      DATABASE_URL: postgres://driving:ci@localhost:5432/driving_school
+      TEST_DATABASE_URL: postgres://driving:ci@localhost:5432/postgres
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm db:migrate
+      - run: pnpm test

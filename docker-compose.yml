@@ -1,0 +1,25 @@
+name: driving-school
+
+# No bind mounts or init scripts on purpose: the Docker host may be another machine (a remote
+# Docker context), where paths from this checkout don't exist. Test databases are created from code.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-driving}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (copy .env.example)}
+      POSTGRES_DB: ${POSTGRES_DB:-driving_school}
+    ports:
+      - "${POSTGRES_PORT:-54329}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Check over TCP: during first-time init Postgres only listens on its Unix socket,
+      # so a socket check would report ready before the real server is up.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata:
