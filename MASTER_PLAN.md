@@ -57,8 +57,16 @@ This is a portfolio proof, not production code. Keep it small, readable and well
 │   ├── db/{pool.ts,kysely.ts,migrate.ts,reset.ts,types.ts}
 │   ├── source/
 │   │   ├── types.ts              # SourceReader interface, RawDoc type
+│   │   ├── collections.ts        # collection names in FK order
+│   │   ├── export-format.ts      # JSON export shape + zod schema ($timestamp wrapper)
+│   │   ├── firestore-client.ts   # Admin SDK connection, emulator vs real-project guards
+│   │   ├── firestore-emulator.ts # emulator REST helpers (health check, clear)
 │   │   ├── firestore-reader.ts   # paginated by documentId, exposes updateTime
 │   │   └── json-reader.ts        # reads fixtures/export.json (same interface)
+│   ├── seed/
+│   │   ├── calendar.ts  reference-data.ts  generate.ts  fixtures.ts  dataset.ts  types.ts
+│   │   └── args.ts  json-export.ts  firestore-writer.ts
+│   ├── util/order.ts             # code-unit order = Firestore document-id order
 │   ├── normalize/
 │   │   ├── dates.ts  status.ts  phone.ts  money.ts  email.ts
 │   │   ├── students.ts  instructors.ts  bookings.ts  cities.ts  pickup-points.ts
@@ -74,7 +82,7 @@ This is a portfolio proof, not production code. Keep it small, readable and well
 │   │   ├── routes/bookings.ts
 │   │   └── repos/{types.ts,postgres.ts,firestore.ts,shadow.ts}
 │   └── cli/{run-cli.ts,migrate.ts,db-reset.ts,seed.ts,backfill.ts,reconcile.ts,sync.ts,serve.ts}
-├── test/{unit/,integration/,fixtures/}
+├── test/{unit/,integration/,fixtures/,support/}
 ├── scripts/demo.sh               # runs the whole demo from a fresh clone
 ├── reports/                      # gitignored run reports
 └── docs/
@@ -101,10 +109,14 @@ Collections (top-level):
 
 Every source doc also carries `updateTime` (from the Firestore snapshot; `_updateTime` in the JSON export). It is used as `legacy_updated_at` for change detection and newer-wins logic.
 
+**JSON export format** (`test/fixtures/export.json`, written by `pnpm seed --target=json`): `{ "collections": { "<name>": [{ "id", "_updateTime", "data" }] } }`, with the collections in FK order and the docs in id order. JSON has no timestamp type, so a Firestore `Timestamp` is written as `{ "$timestamp": "<ISO UTC>" }`. Other values are kept exactly as they are, so the string and number date fixtures stay strings and numbers. Every doc gets the same `_updateTime`: the dataset snapshot, 2026-10-19 07:00 Europe/Rome. The file is committed, and a unit test fails if it no longer matches the seed.
+
 ### 3.1 Seed volume (deterministic, `faker.seed(42)`)
 
 3 cities (Milano, Roma, Torino), 12 pickup points, 15 instructors, 300 students (about 3% duplicates by email), about 2,000 bookings spread over 8 weeks. The generated "normal" data is mostly clean. All the interesting cases come from the **known-bad fixtures** below.
 
+- The fixture instructors and students in §3.2 come on top of these counts (4 instructors, 16 students).
+- Lessons run Monday to Saturday, 08:00–20:00 Rome time. Lessons that ended before the snapshot (2026-10-19 07:00 Europe/Rome) are `completed`, `no_show` or `cancelled`; later ones are `booked`, `confirmed` or `cancelled`. `history` always ends with the current status.
 - The 8-week window starts on a **fixed date**, Monday 2026-09-07, never "now". Faker's date helpers default to today, so always pass the reference date. Otherwise `export.json` would change every day.
 - Generated bookings sit on a **non-overlapping slot grid** for each instructor and each student. The generator itself never creates an overlap.
 - Generated bookings copy the denormalised names **exactly** (`studentName` = `firstName + " " + lastName`, `instructorName` = `fullName`, `cityName` = the city's `name`), so `bk_denorm_drift` is the only booking that triggers `DENORM_DRIFT`.
@@ -543,10 +555,10 @@ Stop at the end of each phase. Show what changed, how to verify it, and the test
   - pnpm, TS strict, biome, vitest, compose Postgres, `.env.example`, zod config, pino logger, migration runner, CI workflow
   - `.gitignore` covers `.env`, `reports/`, `*service-account*.json`
   - *Done when:* `pnpm typecheck`, `pnpm lint` and `pnpm test` (a placeholder test) pass, and `pnpm db:up && pnpm db:migrate` works.
-- [ ] **Phase 1 — Seed messy data**
+- [x] **Phase 1 — Seed messy data**
   - `pnpm seed --target=emulator|json|firestore`, deterministic, with every fixture in §3.2
   - Firestore writes in batches of ≤ 500
-  - Also writes `test/fixtures/export.json`
+  - `--target=json` writes `test/fixtures/export.json`. `--target=emulator` clears the emulator first. `--target=firestore` refuses unless real credentials are set and the collections are empty.
   - *Done when:* the emulator UI shows the collections, and the JSON export has the fixture ids.
 - [ ] **Phase 2 — Schema**
   - migrations 001–004 exactly as in §4, plus `updated_at` triggers
