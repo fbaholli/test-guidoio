@@ -1,0 +1,16 @@
+node_modules/
+coverage/
+reports/
+
+# Secrets: never commit these.
+.env
+.env.*
+!.env.example
+*service-account*.json
+
+# Firebase emulator logs
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+.DS_Store

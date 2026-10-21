@@ -1,0 +1,36 @@
+{
+  "name": "driving-school-migration",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Zero-downtime Firestore to Postgres migration proof, using a driving-school bookings domain.",
+  "type": "module",
+  "packageManager": "pnpm@12.4.2",
+  "engines": {
+    "node": ">=22.9"
+  },
+  "scripts": {
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "db:migrate": "tsx --env-file-if-exists=.env src/cli/migrate.ts",
+    "db:reset": "tsx --env-file-if-exists=.env src/cli/db-reset.ts",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:int": "vitest run --project integration --passWithNoTests",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write ."
+  },
+  "dependencies": {
+    "pg": "8.23.1",
+    "pino": "10.4.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "22.20.5",
+    "@types/pg": "8.23.1",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}
