@@ -18,6 +18,7 @@
     "backfill": "tsx --env-file-if-exists=.env src/cli/backfill.ts",
     "reconcile": "tsx --env-file-if-exists=.env src/cli/reconcile.ts",
     "sync": "tsx --env-file-if-exists=.env src/cli/sync.ts",
+    "dev": "tsx watch --env-file-if-exists=.env src/cli/serve.ts",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:int": "vitest run --project integration --passWithNoTests",
@@ -27,6 +28,8 @@
   },
   "dependencies": {
     "@faker-js/faker": "10.6.0",
+    "fastify": "5.12.7",
+    "fastify-type-provider-zod": "7.0.0",
     "firebase-admin": "14.5.0",
     "kysely": "0.29.7",
     "libphonenumber-js": "1.13.15",
