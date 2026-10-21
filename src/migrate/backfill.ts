@@ -1,6 +1,7 @@
 import type pg from "pg";
 import type { Logger } from "pino";
 import { COLLECTIONS, type CollectionName } from "../source/collections.js";
+import { readAll } from "../source/read-all.js";
 import type { SourceReader } from "../source/types.js";
 import { chunk } from "../util/chunk.js";
 import { compareCodeUnits } from "../util/order.js";
@@ -171,15 +172,4 @@ function record(run: RunState, collection: CollectionName, outcome: BatchOutcome
     });
   }
   for (const warning of outcome.warnings) count(stats.warnings, warning.code);
-}
-
-async function readAll(reader: SourceReader, collection: CollectionName, pageSize: number) {
-  const docs = [];
-  let afterId: string | undefined;
-  for (;;) {
-    const page = await reader.readPage(collection, afterId, pageSize);
-    docs.push(...page);
-    afterId = page.at(-1)?.id;
-    if (page.length < pageSize || afterId === undefined) return docs;
-  }
 }
